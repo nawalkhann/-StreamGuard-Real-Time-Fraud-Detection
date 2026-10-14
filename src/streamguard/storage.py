@@ -124,6 +124,15 @@ class Storage:
         for r in rows:
             yield json.loads(r["payload"])
 
+    def labelled_history(self):
+        """Yield (payload, ts, alert_status|None, decision) ordered by event time."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT t.payload, t.ts, t.decision, a.status FROM transactions t "
+                "LEFT JOIN alerts a USING (transaction_id) ORDER BY t.ts").fetchall()
+        for r in rows:
+            yield json.loads(r["payload"]), r["ts"], r["status"], r["decision"]
+
     def max_ts(self) -> float | None:
         with self._lock:
             r = self._db.execute("SELECT MAX(ts) AS m FROM transactions").fetchone()

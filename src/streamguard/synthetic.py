@@ -173,3 +173,21 @@ def _poisson(rng: random.Random, lam: float) -> int:
         if p <= L:
             return k
         k += 1
+
+
+CSV_COLUMNS = ["transaction_id", "account_id", "amount", "currency", "merchant_id", "merchant_category",
+               "country", "channel", "timestamp", "lat", "lon", "device_id", "ip", "is_fraud"]
+
+
+def write_csv(rows, path: str) -> None:
+    """Write rows in the labelled-CSV format accepted by ``train --csv`` (also a template for your own export)."""
+    import csv
+    from datetime import datetime, timezone
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(CSV_COLUMNS)
+        for t, label, _ in rows:
+            w.writerow([t.id, t.account, t.amount, "USD", t.merchant, t.mcc, t.country, t.channel,
+                        datetime.fromtimestamp(t.ts, timezone.utc).isoformat(),
+                        "" if t.lat is None else round(t.lat, 5), "" if t.lon is None else round(t.lon, 5),
+                        t.device or "", t.ip or "", label])

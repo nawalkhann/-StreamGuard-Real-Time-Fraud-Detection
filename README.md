@@ -82,11 +82,34 @@ All numbers come from **synthetic data** produced by `synthetic.py`, which model
   0.35% false-positive rate, 82% precision**; server-side latency p50 ≈ 1 ms, p99 ≈ 6 ms. Weakest patterns:
   stolen-card (14/25) and one-off amount spikes (6/11), which genuinely resemble legitimate behaviour.
 
+## Training on your real labelled data
+
+```bash
+# 1. See the expected format (also a template for your own export)
+python -m streamguard.train --write-sample sample.csv
+
+# 2a. Train from a labelled history export (CSV, one row per transaction, is_fraud = 0/1)
+python -m streamguard.train --csv my_transactions.csv
+
+# 2b. ...or from analyst dispositions collected by this service, optionally with chargebacks
+python -m streamguard.train --from-db --labels chargebacks.csv     # chargebacks.csv: transaction_id,is_fraud
+```
+
+* All rows (labelled or not) are replayed in time order so account history is correct; the model is evaluated on a
+  **chronological 25% hold-out**, never a random split.
+* It **refuses to train** with fewer than 200 fraud examples in the training window or 20 in the hold-out
+  (`--min-positives` to override knowingly).
+* It prints a precision/recall table per threshold and suggests `REVIEW`/`DECLINE` thresholds meeting precision
+  targets (`--review-precision`, `--decline-precision`). Treat as a starting point; apply your own cost model.
+* **Label caveats:** with `--from-db`, un-alerted approvals are assumed legitimate, so undetected fraud pollutes the
+  negatives; supply chargebacks via `--labels` (they win over dispositions). Alerts still `open` are excluded.
+  Labels are also biased by what the current system chose to flag. Prefer a history export that pre-dates StreamGuard.
+* Restart the service after training; check `/readyz` for the new `model` version.
+
 ## Before using this on real money
 
 * **Retrain on your own labelled history.** The bundled model is a bootstrap so the system runs on day one.
-  Analyst dispositions (`confirmed_fraud` / `false_positive`) are stored for exactly this purpose, but the
-  retraining job from the database is not written yet. Re-tune thresholds on your data and cost of fraud vs.
+  Retrain with `--csv` / `--from-db` (see above). Re-tune thresholds on your data and cost of fraud vs.
   customer friction.
 * **Never send PANs.** `account_id` must be a token. The service stores transaction payloads in SQLite; apply your
   PCI/GDPR retention and encryption-at-rest policy (volume encryption, retention job).
@@ -105,6 +128,6 @@ All numbers come from **synthetic data** produced by `synthetic.py`, which model
 
 ```
 src/streamguard/  config · schemas · features · rules · model · engine · storage · metrics · api · ingest
-                  synthetic (data gen) · train · simulate · static/ (dashboard)
+                  synthetic (data gen) · labelled (CSV/DB loaders) · train · simulate · static/ (dashboard)
 tests/            features, rules, API (auth, idempotency, workflow, websocket, restart, concurrency), model, ingest
 ```
