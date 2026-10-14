@@ -1,0 +1,26 @@
+:root{--bg:#f6f7f9;--fg:#15181d;--muted:#667085;--card:#fff;--line:#e4e7ec;--accent:#2457d6;--red:#c0362c;--amber:#b7791f;--green:#1f7a4d}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1218;--fg:#e8eaee;--muted:#98a2b3;--card:#171b23;--line:#262c38;--accent:#6b93ff;--red:#ff7b72;--amber:#e3b341;--green:#56d364}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:14px 20px;background:var(--card);border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0 auto 0 0}h1 span{color:var(--muted);font-weight:400;margin-left:6px}
+h2{font-size:15px;margin:0}
+form{display:flex;gap:8px}
+input,select,button{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg)}
+button{cursor:pointer}button.primary,form button{background:var(--accent);border-color:var(--accent);color:#fff}
+button.sm{padding:3px 8px;font-size:12px}button.bad{color:var(--red);border-color:var(--red)}button.ok{color:var(--green);border-color:var(--green)}
+.pill{padding:3px 10px;border-radius:99px;font-size:12px}.pill.on{background:#1f7a4d22;color:var(--green)}.pill.off{background:#c0362c22;color:var(--red)}
+main{padding:20px;max-width:1300px;margin:auto}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card b{display:block;font-size:24px;font-variant-numeric:tabular-nums}.card small{color:var(--muted)}
+.bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.scroll{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:10px}
+table{width:100%;border-collapse:collapse}th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap}tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.tag{padding:2px 8px;border-radius:5px;font-size:12px;font-weight:600}
+.DECLINE{background:#c0362c22;color:var(--red)}.REVIEW{background:#b7791f22;color:var(--amber)}
+.muted{color:var(--muted)}.why{max-width:320px}.why div{font-size:12px}
+tr.new{animation:flash 2s}@keyframes flash{from{background:#2457d633}to{background:transparent}}
+.actions{display:flex;gap:4px;white-space:nowrap}

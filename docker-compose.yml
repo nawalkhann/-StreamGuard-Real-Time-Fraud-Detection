@@ -1,0 +1,10 @@
+services:
+  streamguard:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      STREAMGUARD_API_KEYS: ${STREAMGUARD_API_KEYS:?set STREAMGUARD_API_KEYS in .env}
+    volumes: ["sgdata:/data"]
+    restart: unless-stopped
+volumes:
+  sgdata:

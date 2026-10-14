@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StreamGuard</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <h1>StreamGuard <span>fraud operations</span></h1>
+  <form id="keyform">
+    <input id="key" type="password" placeholder="API key" autocomplete="off" aria-label="API key">
+    <input id="analyst" type="text" placeholder="Your name" autocomplete="off" aria-label="Analyst name">
+    <button type="submit">Connect</button>
+  </form>
+  <div id="conn" class="pill off">disconnected</div>
+</header>
+<main>
+  <section class="cards" id="cards"></section>
+  <section>
+    <div class="bar">
+      <h2>Alerts</h2>
+      <select id="filter" aria-label="Status filter">
+        <option value="open">Open</option>
+        <option value="confirmed_fraud">Confirmed fraud</option>
+        <option value="false_positive">False positive</option>
+        <option value="">All</option>
+      </select>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Time</th><th>Decision</th><th>Risk</th><th>Amount</th><th>Account</th><th>Merchant</th><th>Why</th><th>Status</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p id="empty" class="muted" hidden>No alerts.</p>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
