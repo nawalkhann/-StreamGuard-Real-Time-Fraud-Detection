@@ -15,7 +15,8 @@ COPY --from=build /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 COPY --from=build /app/models /app/models
 RUN mkdir -p /data && chown sg /data
 USER sg
-ENV STREAMGUARD_DB_PATH=/data/streamguard.db STREAMGUARD_MODEL_PATH=/app/models/model.joblib
+ENV STREAMGUARD_DB_PATH=/data/streamguard.db STREAMGUARD_MODEL_PATH=/app/models/model.joblib \
+    STREAMGUARD_SANCTIONS_DIR=/data/sanctions
 VOLUME /data
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request as u;u.urlopen('http://127.0.0.1:8000/healthz')" || exit 1

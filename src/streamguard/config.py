@@ -30,6 +30,15 @@ class Settings(BaseSettings):
         "SGD": 0.74, "AUD": 0.66, "CAD": 0.73, "BRL": 0.20, "CNY": 0.14, "JPY": 0.0067,
     }
 
+    # --- counter-terrorism financing / sanctions ---
+    sanctions_dir: str = "data/sanctions"          # see README: sdn.csv, alt.csv, consolidated.xml, custom*.csv
+    sanctions_fuzzy_threshold: float = 0.90        # similarity for non-exact name matches (review, not auto-decline)
+    sanctions_max_age_days: int = 7                # /readyz warns when lists are older than this
+    # Jurisdictions FATF calls for action on / your policy treats as high risk. VERIFY against the current
+    # FATF publication and your own sanctions policy; this default is only a starting point.
+    high_risk_jurisdictions: str = "KP,IR,MM"
+    structuring_threshold_usd: float = 10_000.0    # reporting threshold used to detect structuring
+
     # --- ingestion hygiene ---
     max_future_skew_seconds: int = 300
     max_accounts_in_memory: int = 200_000
@@ -50,6 +59,10 @@ class Settings(BaseSettings):
     @property
     def api_key_list(self) -> list[str]:
         return [k.strip() for k in self.api_keys.split(",") if k.strip()]
+
+    @property
+    def high_risk_jurisdiction_set(self) -> frozenset[str]:
+        return frozenset(c.strip().upper() for c in self.high_risk_jurisdictions.split(",") if c.strip())
 
     @property
     def high_risk_mcc_set(self) -> frozenset[str]:

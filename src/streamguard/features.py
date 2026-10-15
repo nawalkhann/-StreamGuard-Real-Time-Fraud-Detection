@@ -45,6 +45,8 @@ class Txn:
     lon: float | None = None
     device: str | None = None
     ip: str | None = None
+    cp_name: str | None = None      # counterparty / beneficiary name (screened, not a model feature)
+    cp_country: str | None = None
 
 
 @dataclass(slots=True)
@@ -80,8 +82,11 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 class FeatureStore:
-    def __init__(self, high_risk_mccs: frozenset[str] | set[str], max_accounts: int = 200_000):
+    def __init__(self, high_risk_mccs: frozenset[str] | set[str], max_accounts: int = 200_000,
+                 structuring_threshold: float = 10_000.0):
         self.high_risk_mccs = frozenset(high_risk_mccs)
+        self.struct_lo = 0.8 * structuring_threshold
+        self.struct_hi = structuring_threshold
         self.max_accounts = max_accounts
         self._accounts: OrderedDict[str, AccountState] = OrderedDict()
         self._meta = threading.Lock()
@@ -112,7 +117,7 @@ class FeatureStore:
     def compute(self, t: Txn) -> dict[str, float]:
         st = self._get(t.account, create=False) or AccountState()
         ts = t.ts
-        n1 = n10 = n60 = n24 = small10 = 0
+        n1 = n10 = n60 = n24 = small10 = near_thr = 0
         sum24 = 0.0
         merchants_1h: set[str] = set()
         prev: _Event | None = None
@@ -130,6 +135,8 @@ class FeatureStore:
                 prev_geo = e
             n24 += 1
             sum24 += e.amount
+            if self.struct_lo <= e.amount < self.struct_hi:
+                near_thr += 1
             if dt <= 3600:
                 n60 += 1
                 merchants_1h.add(e.merchant)
@@ -180,6 +187,9 @@ class FeatureStore:
             "is_online": float(t.channel in ("online", "wallet")),
             "is_atm": float(t.channel == "atm"),
             "high_risk_mcc": float(t.mcc in self.high_risk_mccs),
+            # rule-only signals (deliberately NOT in FEATURE_NAMES, so the trained model is unaffected)
+            "n_near_threshold_24h": float(near_thr),
+            "near_threshold": float(self.struct_lo <= t.amount < self.struct_hi),
         }
 
     # -- state update ------------------------------------------------------

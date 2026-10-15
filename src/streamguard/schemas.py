@@ -33,11 +33,13 @@ class Transaction(BaseModel):
     lon: float | None = Field(default=None, ge=-180, le=180)
     device_id: str | None = Field(default=None, max_length=128)
     ip: str | None = Field(default=None, max_length=45)
+    counterparty_name: str | None = Field(default=None, max_length=140, description="Beneficiary / payee name, screened against sanctions lists")
+    counterparty_country: str | None = Field(default=None, min_length=2, max_length=2)
 
-    @field_validator("currency", "country")
+    @field_validator("currency", "country", "counterparty_country")
     @classmethod
-    def _upper(cls, v: str) -> str:
-        return v.upper()
+    def _upper(cls, v: str | None) -> str | None:
+        return v.upper() if v is not None else v
 
     @field_validator("timestamp")
     @classmethod
@@ -53,6 +55,7 @@ class Transaction(BaseModel):
             merchant=self.merchant_id, mcc=self.merchant_category, country=self.country,
             channel=self.channel.value, ts=self.timestamp.timestamp(),
             lat=self.lat, lon=self.lon, device=self.device_id, ip=self.ip,
+            cp_name=self.counterparty_name, cp_country=self.counterparty_country,
         )
 
 

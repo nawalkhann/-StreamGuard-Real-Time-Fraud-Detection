@@ -101,8 +101,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def readyz(request: Request) -> dict:
         e = eng(request)
         e.db.ping()
+        stale = [k for k, v in e.screener.sources.items() if v["age_days"] > e.s.sanctions_max_age_days]
         return {"status": "ready", "model": e.model.version if e.model else None,
-                "mode": "ml+rules" if e.model else "rules-only", "accounts_in_memory": len(e.store)}
+                "mode": "ml+rules" if e.model else "rules-only", "accounts_in_memory": len(e.store),
+                "sanctions": {"names": len(e.screener), "sources": e.screener.sources,
+                              "warnings": (["no sanctions lists loaded"] if not len(e.screener) else [])
+                              + [f"{k} is older than {e.s.sanctions_max_age_days} days" for k in stale]}}
 
     @app.get("/metrics", response_class=PlainTextResponse)
     def metrics(request: Request) -> str:

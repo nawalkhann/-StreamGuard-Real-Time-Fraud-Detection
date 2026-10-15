@@ -17,7 +17,8 @@ class RuleHit:
 Blocklist = frozenset  # frozenset[tuple[kind, value]]
 
 
-def evaluate(t: Txn, f: dict[str, float], blocked: frozenset, review_amount_usd: float) -> list[RuleHit]:
+def evaluate(t: Txn, f: dict[str, float], blocked: frozenset, review_amount_usd: float,
+             high_risk_countries: frozenset = frozenset()) -> list[RuleHit]:
     hits: list[RuleHit] = []
 
     for kind, val in (("account", t.account), ("device", t.device), ("ip", t.ip), ("merchant", t.merchant)):
@@ -44,6 +45,16 @@ def evaluate(t: Txn, f: dict[str, float], blocked: frozenset, review_amount_usd:
 
     if f["country_mismatch"] and f["high_risk_mcc"] and t.amount >= 500:
         hits.append(RuleHit("FOREIGN_HIGH_RISK_MCC", "Foreign high-risk merchant category", 0.40))
+
+    # Risk-based jurisdiction check on where the money goes / happens, never on the customer's nationality.
+    for label, c in (("Counterparty", t.cp_country), ("Transaction", t.country)):
+        if c and c in high_risk_countries:
+            hits.append(RuleHit("HIGH_RISK_JURISDICTION", f"{label} country {c} is on the high-risk jurisdiction list", 0.50))
+            break
+
+    # Structuring: repeated amounts just below the reporting threshold within 24h.
+    if f.get("near_threshold") and f.get("n_near_threshold_24h", 0) >= 2:
+        hits.append(RuleHit("STRUCTURING", "Repeated amounts just under the reporting threshold in 24 hours", 0.55))
 
     if t.amount >= review_amount_usd:
         hits.append(RuleHit("AMOUNT_CEILING", f"Amount >= {review_amount_usd:,.0f} USD requires review", 0.55))

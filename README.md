@@ -82,6 +82,40 @@ All numbers come from **synthetic data** produced by `synthetic.py`, which model
   0.35% false-positive rate, 82% precision**; server-side latency p50 ≈ 1 ms, p99 ≈ 6 ms. Weakest patterns:
   stolen-card (14/25) and one-off amount spikes (6/11), which genuinely resemble legitimate behaviour.
 
+## Counter-terrorism financing & sanctions screening
+
+There is **no public labelled dataset of terrorism-financing transactions** (real cases are rare and confidential), so
+this is done the way compliance teams do it: public designation lists, risk-based jurisdiction rules and published
+typologies, with analysts adjudicating hits. No ML model is claimed for this.
+
+| Control | Behaviour |
+|---|---|
+| **Sanctions name screening** of `counterparty_name` | Exact normalised match to a list entry/alias → `DECLINE` (hard). Fuzzy match (word order, spelling variants, accents; >= 2 words, similarity >= 0.90) → `REVIEW`. Reason text names the list and entry id. |
+| **High-risk jurisdiction** | Counterparty or transaction country in `STREAMGUARD_HIGH_RISK_JURISDICTIONS` (default `KP,IR,MM`, **verify against the current FATF publication**) → risk +0.50. Based on where money goes, never the customer's nationality. |
+| **Structuring** | 3+ amounts in 80–100% of the reporting threshold (default 10,000 USD) within 24 h → risk +0.55. |
+
+Lists are files you place in `STREAMGUARD_SANCTIONS_DIR` (default `data/sanctions/`):
+
+| File | Source |
+|---|---|
+| `sdn.csv` + `alt.csv` | OFAC SDN list and aliases (https://ofac.treasury.gov/sanctions-list-service) |
+| `consolidated.xml` | UN Security Council consolidated list |
+| `custom*.csv` | Any other list (EU, your internal watchlist): header `name,id[,list]` |
+
+`scripts/fetch_sanctions.sh` downloads the first two. `/readyz` reports names loaded per list and warns if a list is
+older than 7 days or none is loaded. Restart the service to reload.
+
+**Limits you must know**
+* **Verified on fictitious fixtures only.** The OFAC/UN loaders were written to the published file layouts but have not
+  yet been run on the real downloads (the sandbox's network policy blocked those hosts). Run them once on the real files
+  and check the loaded counts in `/readyz` before relying on them.
+* Hits are **candidates for human review, not determinations**. Names produce false positives; confirm against the
+  source list and follow your institution's legal blocking/reporting process (e.g. SAR/STR filing is out of scope here).
+* Lists change daily; stale lists are a compliance failure. Automate the fetch.
+* Only the counterparty name is screened, and only if the caller sends it. Screening your own customers (KYC) and
+  other lists (EU, UK, local) are separate work. Screening latency is ~2.4 ms on a 40k-name list.
+* Latin-script matching only; no transliteration of Arabic/Cyrillic/CJK names.
+
 ## Training on your real labelled data
 
 ```bash
@@ -127,7 +161,7 @@ python -m streamguard.train --from-db --labels chargebacks.csv     # chargebacks
 ## Layout
 
 ```
-src/streamguard/  config · schemas · features · rules · model · engine · storage · metrics · api · ingest
+src/streamguard/  config · schemas · features · rules · screening · model · engine · storage · metrics · api · ingest
                   synthetic (data gen) · labelled (CSV/DB loaders) · train · simulate · static/ (dashboard)
 tests/            features, rules, API (auth, idempotency, workflow, websocket, restart, concurrency), model, ingest
 ```

@@ -12,6 +12,7 @@ from .config import Settings
 from .features import FeatureStore
 from .metrics import Metrics
 from .model import FraudModel
+from .screening import Screener
 from .schemas import Decision, Reason, Transaction
 from .storage import DuplicateTransaction, Storage
 
@@ -47,7 +48,13 @@ class Engine:
         self.model = model
         self.metrics = Metrics()
         self.alert_listeners: list = []  # callables(alert_dict), invoked from the scoring thread
-        self.store = FeatureStore(settings.high_risk_mcc_set, settings.max_accounts_in_memory)
+        self.store = FeatureStore(settings.high_risk_mcc_set, settings.max_accounts_in_memory,
+                                  settings.structuring_threshold_usd)
+        self.screener = Screener.from_dir(settings.sanctions_dir, settings.sanctions_fuzzy_threshold)
+        if len(self.screener):
+            log.info("Sanctions screening: %d names from %s", len(self.screener), list(self.screener.sources))
+        else:
+            log.warning("Sanctions screening has NO lists loaded (see README, %s)", settings.sanctions_dir)
         self._blocked: frozenset = frozenset()
         self.reload_blocklist()
         if model is None:
@@ -91,7 +98,15 @@ class Engine:
                 return Decision.model_validate(prior)
 
             feats = self.store.compute(t)
-            hits = rules.evaluate(t, feats, self._blocked, self.s.review_amount_usd)
+            hits = rules.evaluate(t, feats, self._blocked, self.s.review_amount_usd, self.s.high_risk_jurisdiction_set)
+            m = self.screener.screen(t.cp_name)
+            if m is not None:
+                kind = "exact" if m.exact else f"fuzzy {m.score:.2f}"
+                hits.append(rules.RuleHit(
+                    "SANCTIONS_MATCH",
+                    f"Counterparty name matches {m.entry.list_name} entry '{m.entry.name}' (id {m.entry.uid}, {kind}); "
+                    "verify against the source list",
+                    1.0 if m.exact else 0.80, hard=m.exact))
             rule_p = rules.combine(hits)
             reasons = [Reason(code=h.code, description=h.description, weight=round(h.weight, 3)) for h in hits]
 
