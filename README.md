@@ -188,12 +188,11 @@ python -m streamguard.train --from-db --labels chargebacks.csv     # chargebacks
 * **Retrain on your own labelled history.** The bundled model is a bootstrap so the system runs on day one.
   Retrain with `--csv` / `--from-db` (see above). Re-tune thresholds on your data and cost of fraud vs.
   customer friction.
-* **Never send PANs.** `account_id` must be a token. The service stores transaction payloads in SQLite; apply your
+* **Never send PANs.** `account_id` must be a token. The service stores transaction payloads in SQLite (or Postgres in scale-out mode); apply your
   PCI/GDPR retention and encryption-at-rest policy (volume encryption, retention job).
-* **Single-process by design.** Feature state is in memory, so run one worker per instance and shard by account
-  upstream. SQLite is fine for tens/hundreds of txn/s; move to Postgres + Redis (or Flink) for more or for HA.
-  The simulator's sequential client reached ~280 txn/s; a concurrency test covers duplicate deliveries, but there
-  has been no load test beyond that.
+* **Default mode is single-process** (SQLite + in-memory state; fine for tens to hundreds of txn/s; the simulator's
+  sequential client reached ~280 txn/s). For more throughput or HA use scale-out mode (see above). There are **no
+  scale-out throughput numbers yet**, and Redis/Postgres failover is not configured here.
 * **Model artefacts are pickles** (joblib) — only load files you produced. 
 * **FX rates are a static table** (`config.py`); replace with a rates feed.
 * **Verified in CI** (GitHub Actions): tests on Python 3.11 / 3.12 / 3.13, and the Docker image builds, starts, serves
