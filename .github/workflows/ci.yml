@@ -1,0 +1,38 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (also trains the bootstrap model)
+        run: docker build -t streamguard:ci .
+      - name: Smoke test the container
+        run: |
+          docker run -d --name sg -p 8000:8000 -e STREAMGUARD_API_KEYS=ci-key streamguard:ci
+          for i in $(seq 1 30); do curl -fs localhost:8000/healthz && break || sleep 1; done
+          curl -fs localhost:8000/readyz | tee /dev/stderr | grep -q '"mode":"ml+rules"'
+          curl -fs localhost:8000/static/app.js -o /dev/null
+          curl -fs -X POST localhost:8000/v1/transactions/score -H 'X-API-Key: ci-key' -H 'content-type: application/json' \
+            -d '{"transaction_id":"ci-1","account_id":"a","amount":20,"merchant_id":"m","merchant_category":"5411","country":"US","channel":"online","timestamp":"2026-01-01T00:00:00Z"}' \
+            | tee /dev/stderr | grep -q '"decision"'
+      - if: failure()
+        run: docker logs sg
