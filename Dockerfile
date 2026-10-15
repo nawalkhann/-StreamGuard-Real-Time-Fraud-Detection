@@ -2,7 +2,7 @@ FROM python:3.12-slim AS build
 WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
-RUN pip install --no-cache-dir . 
+RUN pip install --no-cache-dir '.[scale]'
 # Bootstrap model on synthetic data so the image works out of the box.
 # For production, replace /app/models/model.joblib with a model trained on your labelled history.
 RUN mkdir -p /app/models && STREAMGUARD_MODEL_PATH=/app/models/model.joblib python -m streamguard.train --accounts 2000

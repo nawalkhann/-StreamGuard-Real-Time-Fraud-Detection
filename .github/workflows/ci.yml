@@ -36,3 +36,53 @@ jobs:
             | tee /dev/stderr | grep -q '"decision"'
       - if: failure()
         run: docker logs sg
+
+  scaleout:
+    name: scale-out tests (real Postgres + Redis)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_USER: sg, POSTGRES_PASSWORD: sg, POSTGRES_DB: streamguard_test}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sg" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      STREAMGUARD_TEST_PG_URL: postgresql://sg:sg@localhost:5432/streamguard_test
+      STREAMGUARD_TEST_REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -e '.[dev]'
+      - name: Full suite incl. Postgres contract + Redis distributed tests (none may be skipped)
+        shell: bash   # -eo pipefail, so a pytest failure is not hidden by tee
+        run: |
+          python -m pytest -q -rs | tee out.txt
+          ! grep -qi "skipped" out.txt
+
+  compose-scale:
+    name: scaled stack smoke test (2 instances behind nginx)
+    runs-on: ubuntu-latest
+    env:
+      STREAMGUARD_API_KEYS: ci-key
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f docker-compose.scale.yml up -d --build
+      - name: Wait for the load balancer
+        run: for i in $(seq 1 60); do curl -fs localhost:8000/healthz && break || sleep 2; done
+      - name: Score through the LB; both instances must be wired to Postgres + Redis
+        run: |
+          curl -fs localhost:8000/readyz | tee /dev/stderr | grep -q '"feature_store":"redis"'
+          for i in $(seq 1 6); do
+            curl -fs -X POST localhost:8000/v1/transactions/score -H 'X-API-Key: ci-key' -H 'content-type: application/json' \
+              -d "{\"transaction_id\":\"ci-$i\",\"account_id\":\"same-account\",\"amount\":20,\"merchant_id\":\"m\",\"merchant_category\":\"5411\",\"country\":\"US\",\"channel\":\"online\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > /dev/null
+          done
+          curl -fs -H 'X-API-Key: ci-key' localhost:8000/v1/stats | tee /dev/stderr | grep -q '"total":6'
+      - if: failure()
+        run: docker compose -f docker-compose.scale.yml logs --tail=80

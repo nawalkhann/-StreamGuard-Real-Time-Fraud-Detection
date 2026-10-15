@@ -1,0 +1,36 @@
+# Multi-instance StreamGuard: shared Postgres (audit log, alerts, blocklist) + Redis (feature state, fan-out).
+#   STREAMGUARD_API_KEYS=... docker compose -f docker-compose.scale.yml up --build
+# Add instances by copying an app service and adding it to deploy/nginx.conf.
+x-app: &app
+  build: .
+  environment: &env
+    STREAMGUARD_API_KEYS: ${STREAMGUARD_API_KEYS:?set STREAMGUARD_API_KEYS}
+    STREAMGUARD_DATABASE_URL: postgresql://sg:${POSTGRES_PASSWORD:-sg-dev-only}@postgres:5432/streamguard
+    STREAMGUARD_REDIS_URL: redis://redis:6379/0
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: sg
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sg-dev-only}
+      POSTGRES_DB: streamguard
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U sg -d streamguard"], interval: 3s, retries: 20}
+  redis:
+    image: redis:7
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redisdata:/data"]
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 3s, retries: 20}
+  app1: *app
+  app2: *app
+  lb:
+    image: nginx:1.27
+    ports: ["8000:80"]
+    volumes: ["./deploy/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on: [app1, app2]
+volumes: {pgdata: {}, redisdata: {}}

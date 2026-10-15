@@ -127,6 +127,38 @@ older than 7 days or none is loaded. Restart the service to reload.
   other lists (EU, UK, local) are separate work. Screening latency is ~2.4 ms on a 40k-name list.
 * Latin-script matching only; no transliteration of Arabic/Cyrillic/CJK names.
 
+## Scaling out (multiple instances)
+
+Default mode is one process: SQLite + in-memory feature state. Set two variables to run any number of identical
+instances behind a plain load balancer:
+
+| Variable | Effect |
+|---|---|
+| `STREAMGUARD_DATABASE_URL=postgresql://user:pass@host/db` | Shared audit log, alerts, blocklist (database must be UTF8; checked at startup) |
+| `STREAMGUARD_REDIS_URL=redis://host:6379/0` | Shared per-account feature state; alert fan-out to every instance's dashboard; blocklist invalidation. **Requires the database URL.** |
+
+```bash
+STREAMGUARD_API_KEYS=... docker compose -f docker-compose.scale.yml up --build   # 2 instances + Postgres + Redis + nginx on :8000
+```
+
+How it stays correct
+* Each transaction takes a short **per-account Redis lock**; state is loaded, features computed, the decision saved to
+  Postgres, then state is written back **fenced** (refused if the lock lease expired, which invalidates the cached state).
+* **Postgres is the source of truth.** If Redis is flushed or an account expires, its state is rebuilt from stored
+  transactions on next use. Scoring is idempotent on `transaction_id` across instances.
+* **Redis down = scoring fails (HTTP 500), never silently scores with empty history.** Decide at your gateway whether to
+  fail open or closed; run Redis with persistence/replication for HA (not configured here).
+* Blocklist changes reach other instances within milliseconds (pub/sub) and at worst within
+  `STREAMGUARD_BLOCKLIST_REFRESH_SECONDS` (default 30).
+* Trade-off: ~3 extra Redis round trips per transaction versus in-memory state. Measure on your hardware
+  (`scripts/loadtest.py --url http://a --url http://b`); there are no published scale numbers for this mode yet.
+
+Verified: contract tests run the same suite against SQLite and Postgres; distributed tests (real Postgres + Redis)
+cover identical features vs. the memory store, recovery after a Redis flush, fencing, exactly-once under 80 concurrent
+deliveries across two instances, cross-instance alerts/blocklist, and Redis outage. Deliberately breaking the lock makes
+the exactly-once test fail (37/40 updates survived). CI runs all of it plus a compose smoke test. **Not verified:**
+throughput scaling, Redis/Postgres failover behaviour, and the compose stack outside CI.
+
 ## Training on your real labelled data
 
 ```bash
