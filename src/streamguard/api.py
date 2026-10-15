@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -14,11 +15,9 @@ from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from .config import Settings
-from .engine import Engine, SchemaError
+from .engine import CH_ALERTS, CH_BLOCKLIST, Engine, SchemaError, build_engine
 from .ingest import run_kafka
-from .model import FraudModel
 from .schemas import AlertStatus, AlertUpdate, BlockEntry, Decision, Transaction
-from .storage import Storage
 
 log = logging.getLogger("streamguard")
 STATIC = Path(__file__).parent / "static"
@@ -36,6 +35,39 @@ class AlertHub:
                 q.put_nowait(alert)
             except asyncio.QueueFull:
                 pass  # slow consumer: drop rather than block scoring
+
+
+async def refresh_blocklist(engine: Engine, seconds: int) -> None:
+    while True:
+        await asyncio.sleep(seconds)
+        try:
+            await run_in_threadpool(engine.reload_blocklist)
+        except Exception:
+            log.exception("periodic blocklist reload failed")
+
+
+async def bus_listener(redis_url: str, hub: AlertHub, engine: Engine) -> None:
+    """Receive alerts / blocklist-change notices published by any instance."""
+    import redis.asyncio as aredis
+    while True:
+        r = aredis.Redis.from_url(redis_url)
+        try:
+            ps = r.pubsub()
+            await ps.subscribe(CH_ALERTS, CH_BLOCKLIST)
+            async for msg in ps.listen():
+                if msg["type"] != "message":
+                    continue
+                ch = msg["channel"].decode() if isinstance(msg["channel"], bytes) else msg["channel"]
+                if ch == CH_ALERTS:
+                    hub.publish(json.loads(msg["data"]))
+                else:
+                    await run_in_threadpool(engine.reload_blocklist)
+        except asyncio.CancelledError:
+            await r.aclose()
+            raise
+        except Exception:
+            log.exception("pub/sub listener failed; reconnecting")
+            await asyncio.sleep(2)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -61,20 +93,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
         if s.auth_disabled:
             log.warning("AUTH DISABLED - do not expose this instance")
-        db = Storage(s.db_path)
-        engine = Engine(s, db, FraudModel.load(s.model_path))
+        engine = build_engine(s)
         engine.warm_start()
         hub = AlertHub()
         loop = asyncio.get_running_loop()
-        engine.alert_listeners.append(lambda a: loop.call_soon_threadsafe(hub.publish, a))
+        tasks = [asyncio.create_task(refresh_blocklist(engine, s.blocklist_refresh_seconds))]
+        if engine.redis is not None:
+            engine.alert_listeners.append(engine.publish_alert)  # delivered back to every instance's hub via pub/sub
+            tasks.append(asyncio.create_task(bus_listener(s.redis_url, hub, engine)))
+        else:
+            engine.alert_listeners.append(lambda a: loop.call_soon_threadsafe(hub.publish, a))
         app.state.engine, app.state.hub = engine, hub
-        task = asyncio.create_task(run_kafka(engine, s)) if s.kafka_bootstrap else None
+        if s.kafka_bootstrap:
+            tasks.append(asyncio.create_task(run_kafka(engine, s)))
         try:
             yield
         finally:
-            if task:
-                task.cancel()
-            db.close()
+            for t in tasks:
+                t.cancel()
+            engine.db.close()
+            if engine.redis is not None:
+                engine.redis.close()
 
     app = FastAPI(title="StreamGuard", version=__version__, lifespan=lifespan)
     auth = [Depends(require_key)]
@@ -103,7 +142,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         e.db.ping()
         stale = [k for k, v in e.screener.sources.items() if v["age_days"] > e.s.sanctions_max_age_days]
         return {"status": "ready", "model": e.model.version if e.model else None,
-                "mode": "ml+rules" if e.model else "rules-only", "accounts_in_memory": len(e.store),
+                "mode": "ml+rules" if e.model else "rules-only", "accounts_in_memory": e.store.accounts(),
+                "feature_store": e.store.describe()["backend"],
+                "database": "postgres" if e.s.database_url else "sqlite",
                 "sanctions": {"names": len(e.screener), "sources": e.screener.sources,
                               "warnings": (["no sanctions lists loaded"] if not len(e.screener) else [])
                               + [f"{k} is older than {e.s.sanctions_max_age_days} days" for k in stale]}}
@@ -111,7 +152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/metrics", response_class=PlainTextResponse)
     def metrics(request: Request) -> str:
         e = eng(request)
-        return e.metrics.render(e.model is not None, len(e.store))
+        return e.metrics.render(e.model is not None, e.store.accounts())
 
     # ---- scoring ----
     @app.post("/v1/transactions/score", response_model=Decision, dependencies=auth)
@@ -164,6 +205,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         e = eng(request)
         e.db.block(entry.kind, entry.value, entry.reason)
         e.reload_blocklist()
+        e.announce_blocklist_change()
         return entry.model_dump()
 
     @app.delete("/v1/blocklist/{kind}/{value}", status_code=204, dependencies=auth)
@@ -172,6 +214,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not e.db.unblock(kind, value):
             raise HTTPException(404, "entry not found")
         e.reload_blocklist()
+        e.announce_blocklist_change()
         return Response(status_code=204)
 
     # ---- live alert stream ----

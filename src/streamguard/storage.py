@@ -133,6 +133,15 @@ class Storage:
         for r in rows:
             yield json.loads(r["payload"]), r["ts"], r["status"], r["decision"]
 
+    def account_history(self, account_id: str, since_ts: float):
+        """Payloads for one account (event-time order), used to rebuild its feature state."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT payload FROM transactions WHERE account_id=? AND ts>=? ORDER BY ts",
+                (account_id, since_ts)).fetchall()
+        for r in rows:
+            yield json.loads(r["payload"])
+
     def max_ts(self) -> float | None:
         with self._lock:
             r = self._db.execute("SELECT MAX(ts) AS m FROM transactions").fetchone()
@@ -216,3 +225,11 @@ class Storage:
             "open_alerts_total": open_total,
             "latency_ms": {"p50": p(0.50), "p95": p(0.95), "p99": p(0.99)},
         }
+
+
+def make_storage(settings):
+    """SQLite by default; Postgres when STREAMGUARD_DATABASE_URL is set."""
+    if settings.database_url:
+        from .storage_pg import PostgresStorage
+        return PostgresStorage(settings.database_url, settings.pg_pool_max)
+    return Storage(settings.db_path)

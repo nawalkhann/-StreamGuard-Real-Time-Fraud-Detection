@@ -34,7 +34,7 @@ class Metrics:
         with self._lock:
             self.duplicates += 1
 
-    def render(self, model_loaded: bool, accounts_in_memory: int) -> str:
+    def render(self, model_loaded: bool, accounts_in_memory: int | None) -> str:
         with self._lock:
             out = ["# TYPE streamguard_decisions_total counter"]
             for d, c in sorted(self.decisions.items()):
@@ -48,6 +48,8 @@ class Metrics:
                     f"streamguard_score_seconds_sum {self._sum:.6f}",
                     f"streamguard_score_seconds_count {self._count}",
                     "# TYPE streamguard_model_loaded gauge", f"streamguard_model_loaded {int(model_loaded)}",
-                    "# TYPE streamguard_accounts_in_memory gauge",
-                    f"streamguard_accounts_in_memory {accounts_in_memory}"]
+                    ]
+            if accounts_in_memory is not None:
+                out += ["# TYPE streamguard_accounts_in_memory gauge",
+                        f"streamguard_accounts_in_memory {accounts_in_memory}"]
         return "\n".join(out) + "\n"

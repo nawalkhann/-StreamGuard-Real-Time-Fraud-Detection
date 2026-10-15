@@ -18,6 +18,14 @@ class Settings(BaseSettings):
     model_path: str = "models/model.joblib"
     warm_start_days: int = 30
 
+    # --- scale-out (optional). Unset = single-process SQLite + in-memory state. ---
+    database_url: str = ""          # postgresql://user:pass@host:5432/db  -> shared audit log / alerts / blocklist
+    redis_url: str = ""             # redis://host:6379/0 -> shared feature state + alert/blocklist fan-out (needs database_url)
+    pg_pool_max: int = 10
+    redis_lock_ms: int = 5000       # per-account lock lease while scoring one transaction
+    redis_state_ttl_days: int = 45  # idle accounts expire from Redis; rebuilt from the database on next use
+    blocklist_refresh_seconds: int = 30  # safety-net reload in case a pub/sub invalidation is missed
+
     # --- decisioning ---
     review_threshold: float = 0.50
     decline_threshold: float = 0.85
@@ -52,6 +60,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check(self) -> "Settings":
+        if self.redis_url and not self.database_url:
+            raise ValueError("STREAMGUARD_REDIS_URL requires STREAMGUARD_DATABASE_URL (SQLite cannot be shared between instances)")
         if not 0 < self.review_threshold < self.decline_threshold <= 1:
             raise ValueError("require 0 < review_threshold < decline_threshold <= 1")
         return self

@@ -10,13 +10,17 @@ from pydantic import ValidationError
 from . import rules
 from .config import Settings
 from .features import FeatureStore
+from .feature_store_redis import RedisFeatureStore
 from .metrics import Metrics
 from .model import FraudModel
 from .screening import Screener
 from .schemas import Decision, Reason, Transaction
-from .storage import DuplicateTransaction, Storage
+from .storage import DuplicateTransaction, make_storage
 
 log = logging.getLogger(__name__)
+
+CH_ALERTS = "sg:alerts"
+CH_BLOCKLIST = "sg:blocklist"
 
 FEATURE_LABELS = {
     "amount_zscore": "Unusual amount for this account",
@@ -49,14 +53,15 @@ class SchemaError(ValueError):
 
 
 class Engine:
-    def __init__(self, settings: Settings, storage: Storage, model: FraudModel | None):
+    def __init__(self, settings: Settings, storage, model: FraudModel | None, store=None, redis_client=None):
         self.s = settings
         self.db = storage
         self.model = model
         self.metrics = Metrics()
         self.alert_listeners: list = []  # callables(alert_dict), invoked from the scoring thread
-        self.store = FeatureStore(settings.high_risk_mcc_set, settings.max_accounts_in_memory,
-                                  settings.structuring_threshold_usd)
+        self.redis = redis_client  # sync client when scaled out; used for alert / blocklist fan-out
+        self.store = store or FeatureStore(settings.high_risk_mcc_set, settings.max_accounts_in_memory,
+                                           settings.structuring_threshold_usd)
         self.screener = Screener.from_dir(settings.sanctions_dir, settings.sanctions_fuzzy_threshold)
         if len(self.screener):
             log.info("Sanctions screening: %d names from %s", len(self.screener), list(self.screener.sources))
@@ -71,8 +76,22 @@ class Engine:
     def reload_blocklist(self) -> None:
         self._blocked = frozenset((b["kind"], b["value"]) for b in self.db.blocklist())
 
+    def announce_blocklist_change(self) -> None:
+        """Tell the other instances to reload (they also reload periodically as a safety net)."""
+        if self.redis is not None:
+            try:
+                self.redis.publish(CH_BLOCKLIST, "1")
+            except Exception:
+                log.exception("could not publish blocklist change; peers will pick it up on their periodic reload")
+
+    def publish_alert(self, alert: dict) -> None:
+        import json
+        self.redis.publish(CH_ALERTS, json.dumps(alert))
+
     def warm_start(self) -> int:
-        """Rebuild in-memory feature state from the persisted transaction log."""
+        """Rebuild in-memory feature state from the persisted transaction log (memory store only)."""
+        if not getattr(self.store, "needs_warm_start", True):
+            return 0
         latest = self.db.max_ts()
         if latest is None:
             return 0
@@ -97,14 +116,14 @@ class Engine:
         if t.ts > time.time() + self.s.max_future_skew_seconds:
             raise SchemaError("timestamp is too far in the future")
 
-        with self.store.account_lock(t.account):
+        with self.store.session(t.account) as sess:
             prior = self.db.get_result(txn.transaction_id)
             if prior is not None:  # idempotent replay
                 self.metrics.duplicate()
                 prior["duplicate"] = True
                 return Decision.model_validate(prior)
 
-            feats = self.store.compute(t)
+            feats = sess.compute(t)
             hits = rules.evaluate(t, feats, self._blocked, self.s.review_amount_usd, self.s.high_risk_jurisdiction_set)
             m = self.screener.screen(t.cp_name)
             if m is not None:
@@ -151,7 +170,7 @@ class Engine:
                 self.metrics.duplicate()
                 prior["duplicate"] = True
                 return Decision.model_validate(prior)
-            self.store.commit(t)
+            sess.commit(t)
 
         self.metrics.observe(outcome, time.perf_counter() - t0)
         if alert is not None:
@@ -161,3 +180,30 @@ class Engine:
                 except Exception:  # a broken subscriber must never break scoring
                     log.exception("alert listener failed")
         return decision
+
+
+def _decoder(settings: Settings):
+    def decode(payload: dict):
+        try:
+            return Transaction.model_validate(payload).to_internal(settings.fx_rates)
+        except (ValidationError, ValueError):
+            return None
+    return decode
+
+
+def build_engine(settings: Settings) -> Engine:
+    """Wire storage / feature store / model according to configuration (single-process or scaled out)."""
+    db = make_storage(settings)
+    model = FraudModel.load(settings.model_path)
+    store = client = None
+    if settings.redis_url:
+        import redis
+        client = redis.Redis.from_url(settings.redis_url, socket_timeout=1.0, socket_connect_timeout=2.0,
+                                      health_check_interval=15)
+        client.ping()
+        store = RedisFeatureStore(client, db, _decoder(settings), settings.high_risk_mcc_set,
+                                  settings.structuring_threshold_usd, settings.redis_lock_ms,
+                                  settings.redis_state_ttl_days, settings.warm_start_days)
+    log.info("storage=%s feature_store=%s", "postgres" if settings.database_url else "sqlite",
+             "redis" if client else "memory")
+    return Engine(settings, db, model, store, client)

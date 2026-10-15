@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from .config import Settings
 from .schemas import Transaction
-from .storage import Storage
+from .storage import make_storage
 
 log = logging.getLogger(__name__)
 OPTIONAL = ("lat", "lon", "device_id", "ip")
@@ -66,7 +66,7 @@ def load_db(settings: Settings, label_file: str | None, assume_approved_legit: b
     """
     overrides = read_labels(label_file) if label_file else {}
     rows = []
-    db = Storage(settings.db_path)
+    db = make_storage(settings)
     try:
         for payload, _, status, decision in db.labelled_history():
             t = Transaction.model_validate(payload).to_internal(settings.fx_rates)
