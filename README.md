@@ -153,8 +153,10 @@ python -m streamguard.train --from-db --labels chargebacks.csv     # chargebacks
   has been no load test beyond that.
 * **Model artefacts are pickles** (joblib) — only load files you produced. 
 * **FX rates are a static table** (`config.py`); replace with a rates feed.
-* **Not yet verified:** the Docker image (no Docker daemon was available when this was written) and the Kafka
-  adapter against a real broker (the transport-independent `process_message` core is unit-tested).
+* **Verified in CI** (GitHub Actions): tests on Python 3.11 / 3.12 / 3.13, and the Docker image builds, starts, serves
+  the dashboard assets and scores a transaction.
+* **Not yet verified:** the Kafka adapter against a real broker (the transport-independent `process_message` core is
+  unit-tested), and the OFAC/UN list loaders on real downloads (see the sanctions section).
 * Single shared API-key scheme and free-text analyst names; add SSO/RBAC before multi-team use.
   Expose `/metrics` and `/readyz` only on an internal network.
 
