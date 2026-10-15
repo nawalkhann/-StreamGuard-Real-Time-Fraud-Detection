@@ -34,6 +34,13 @@ FEATURE_LABELS = {
     "is_online": "Card-not-present channel",
     "distinct_merchants_1h": "Many distinct merchants in an hour",
     "log_secs_since_last": "Very short time since last transaction",
+    "sum_24h_log": "High total spend in the last 24 hours",
+    "n_24h": "High transaction count in the last 24 hours",
+    "history_len": "Little transaction history for this account",
+    "device_missing": "No device identifier supplied",
+    "is_atm": "ATM withdrawal",
+    "hour_sin": "Unusual time of day",
+    "hour_cos": "Unusual time of day",
 }
 
 

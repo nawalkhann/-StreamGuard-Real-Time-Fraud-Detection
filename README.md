@@ -37,6 +37,17 @@ curl -X POST localhost:8000/v1/transactions/score -H "X-API-Key: $KEY" -H 'conte
  "reasons":[],"model_version":"gbm-96320d90","latency_ms":1.2,"duplicate":false, "...": "..."}
 ```
 
+## See it work
+
+```bash
+make run                                     # terminal 1 (set STREAMGUARD_API_KEYS first)
+python scripts/demo.py --api-key $KEY        # terminal 2: narrated attack scenarios, one decision per line
+make simulate                                # bulk labelled traffic + detection report
+```
+Open http://127.0.0.1:8000, enter the key and your name, and watch alerts arrive live. `scripts/demo.py` covers: normal
+purchase, card testing, account takeover, impossible travel, sanctions hits (fictitious names), structuring +
+high-risk jurisdiction, idempotent retry, and blocklisting.
+
 ## How a decision is made
 
 1. **Streaming features** (`features.py`) — per-account sliding windows computed from event time:

@@ -41,3 +41,9 @@ def test_amount_ceiling():
 def test_combine_is_noisy_or():
     h = [rules.RuleHit("a", "", 0.5), rules.RuleHit("b", "", 0.5)]
     assert abs(rules.combine(h) - 0.75) < 1e-9 and rules.combine([]) == 0
+
+
+def test_every_model_feature_has_an_analyst_readable_label():
+    from streamguard.engine import FEATURE_LABELS
+    from streamguard.features import FEATURE_NAMES
+    assert [n for n in FEATURE_NAMES if n not in FEATURE_LABELS] == []
